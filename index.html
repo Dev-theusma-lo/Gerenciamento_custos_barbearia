@@ -31,6 +31,9 @@
       <button class="nav-item" data-page="relatorios" onclick="navigate('relatorios')">
         <span class="icon">📈</span><span>Relatórios</span>
       </button>
+      <button class="nav-item" data-page="clientes" onclick="navigate('clientes')">
+        <span class="icon">🧑</span><span>Clientes</span>
+      </button>
       <button class="nav-item" data-page="pacotes" onclick="navigate('pacotes')">
         <span class="icon">👤</span><span>Pacotes</span>
       </button>
@@ -251,6 +254,19 @@
       </div>
 
       <div class="config-section">
+        <h3>Serviços e valores (para atendimentos)</h3>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
+          Esses serviços aparecem como checklist ao registrar um atendimento de cliente.
+        </p>
+        <div class="servico-cfg-list" id="servico-cfg-list"></div>
+        <div class="servico-cfg-row" style="margin-top:12px">
+          <input type="text" id="novo-servico-nome" placeholder="Nome do serviço (ex: Corte)">
+          <input type="number" id="novo-servico-valor" placeholder="Valor (R$)" min="0" step="0.01">
+          <button class="btn btn-primary btn-sm" onclick="adicionarServicoCfg()" style="padding:8px">+</button>
+        </div>
+      </div>
+
+      <div class="config-section">
         <h3>Categorias</h3>
         <div style="display:flex;gap:10px">
           <input type="text" id="nova-cat" placeholder="Nova categoria..." style="flex:1"
@@ -276,6 +292,30 @@
       </div>
     </section>
 
+
+
+    <!-- CLIENTES (ATENDIMENTOS) -->
+    <section class="page" id="page-clientes">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px">
+        <div>
+          <h2 class="page-title">Clientes</h2>
+          <p class="page-subtitle">Cadastro e histórico de atendimentos</p>
+        </div>
+        <button class="btn btn-primary" onclick="abrirModalCliente()">+ Novo cliente</button>
+      </div>
+
+      <div class="clientes-busca">
+        <input type="text" id="clientes-busca" placeholder="Buscar por nome ou telefone..."
+          oninput="renderClientes()">
+      </div>
+
+      <div class="clientes-grid" id="clientes-grid">
+        <div class="cliente-empty">
+          <div class="empty-icon">🧑</div>
+          <p>Nenhum cliente cadastrado ainda</p>
+        </div>
+      </div>
+    </section>
 
     <!-- PACOTES MENSAIS -->
     <section class="page" id="page-pacotes">
@@ -406,6 +446,88 @@
 
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="fecharModalUsos()">Fechar</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- MODAL: NOVO / EDITAR CLIENTE -->
+<div class="modal-overlay" id="modal-cliente">
+  <div class="modal">
+    <h2 id="modal-cliente-titulo">Novo cliente</h2>
+    <div class="form-grid">
+      <div class="form-group full">
+        <label for="cli-nome">Nome *</label>
+        <input type="text" id="cli-nome" placeholder="Ex: Maria Souza">
+      </div>
+      <div class="form-group">
+        <label for="cli-tel">Telefone</label>
+        <input type="text" id="cli-tel" placeholder="Ex: (16) 99999-0000">
+      </div>
+      <div class="form-group">
+        <label for="cli-nascimento">Data de nascimento</label>
+        <input type="date" id="cli-nascimento">
+      </div>
+      <div class="form-group full">
+        <label for="cli-desde">Cliente desde</label>
+        <input type="date" id="cli-desde">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="fecharModalCliente()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarCliente()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: REGISTRAR ATENDIMENTO -->
+<div class="modal-overlay" id="modal-atendimento">
+  <div class="modal" style="max-width:520px">
+    <h2>Registrar atendimento</h2>
+
+    <div class="atend-avisos" id="atend-avisos"></div>
+
+    <div class="atend-cliente-info" id="atend-cliente-nome-tel"></div>
+
+    <div class="form-group full" style="margin-bottom:14px">
+      <label for="atend-data">Data do serviço</label>
+      <input type="date" id="atend-data">
+    </div>
+
+    <label style="margin-bottom:8px;display:block">Serviços prestados</label>
+    <div class="servicos-checklist" id="servicos-checklist"></div>
+
+    <div class="produto-avulso-row">
+      <div class="form-group">
+        <label for="atend-produto-nome">Produto avulso (opcional)</label>
+        <input type="text" id="atend-produto-nome" placeholder="Ex: Pomada modeladora">
+      </div>
+      <div class="form-group">
+        <label for="atend-produto-valor">Valor (R$)</label>
+        <input type="number" id="atend-produto-valor" placeholder="0,00" min="0" step="0.01"
+          oninput="atualizarTotalAtendimento()">
+      </div>
+    </div>
+
+    <div class="atend-total">
+      <span class="atend-total-label">Valor total</span>
+      <span class="atend-total-valor" id="atend-total-valor">R$ 0,00</span>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="fecharModalAtendimento()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarAtendimento()">Salvar atendimento</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: HISTÓRICO DE ATENDIMENTOS DO CLIENTE -->
+<div class="modal-overlay" id="modal-hist-cliente">
+  <div class="modal" style="max-width:480px">
+    <h2 id="modal-hist-cliente-titulo">Histórico</h2>
+    <div class="hist-atend-lista" id="hist-atend-lista"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="fecharModalHistoricoCliente()">Fechar</button>
     </div>
   </div>
 </div>

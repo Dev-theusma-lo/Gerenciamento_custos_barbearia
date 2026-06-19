@@ -506,6 +506,7 @@ function download(nome, tipo, conteudo) {
 window.addEventListener('DOMContentLoaded', () => {
   initDefaults();
   initPacotes();
+  initClientes();
   fecharMesesAnteriores();
 
   const config = DB.get('config') || {};
@@ -864,3 +865,452 @@ importarJSON = function(e) {
   };
   reader.readAsText(file);
 };
+
+/* ═══════════════════════════════════════════════
+   CLIENTES — CADASTRO E ATENDIMENTOS
+   ═══════════════════════════════════════════════ */
+
+function initClientes() {
+  if (!DB.get('clientes_atendimento')) DB.set('clientes_atendimento', []);
+  if (!DB.get('servicos_precos')) {
+    DB.set('servicos_precos', [
+      { id: gerarId(), nome: 'Corte', valor: 35 },
+      { id: gerarId(), nome: 'Barba', valor: 25 },
+      { id: gerarId(), nome: 'Sobrancelha', valor: 15 },
+    ]);
+  }
+  const config = DB.get('config') || {};
+  if (config.categorias && !config.categorias.includes('Atendimento')) {
+    config.categorias.push('Atendimento');
+    DB.set('config', config);
+  }
+}
+
+/* ─── Render principal da aba ─── */
+function renderClientes() {
+  const clientes = DB.get('clientes_atendimento') || [];
+  const busca = (document.getElementById('clientes-busca')?.value || '').toLowerCase();
+
+  let lista = clientes.slice();
+  if (busca) {
+    lista = lista.filter(c =>
+      c.nome.toLowerCase().includes(busca) || (c.telefone || '').includes(busca)
+    );
+  }
+  lista.sort((a, b) => a.nome.localeCompare(b.nome));
+
+  const grid = document.getElementById('clientes-grid');
+
+  if (lista.length === 0) {
+    grid.innerHTML = `
+      <div class="cliente-empty">
+        <div class="empty-icon">👤</div>
+        <p>${clientes.length === 0 ? 'Nenhum cliente cadastrado ainda' : 'Nenhum cliente encontrado'}</p>
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = lista.map(c => renderCardCliente(c)).join('');
+}
+
+function renderCardCliente(c) {
+  const isAniversario = checarMesAniversario(c.nascimento);
+  const atendimentos = c.atendimentos || [];
+  const totalAtendimentos = atendimentos.length;
+  const clienteDesde = formatDataBR(c.clienteDesde);
+  const nascimentoFmt = c.nascimento ? formatDataBR(c.nascimento) : '—';
+
+  return `
+    <div class="cliente-card ${isAniversario ? 'aniversario' : ''}">
+      <div class="cliente-card-header">
+        <div>
+          <div class="cliente-nome">${c.nome}</div>
+          <div class="cliente-tel">${c.telefone || '—'}</div>
+        </div>
+        ${isAniversario ? '<span class="cliente-badge-aniv">🎂 Aniversário</span>' : ''}
+      </div>
+      <div class="cliente-meta">
+        <div class="cliente-meta-row"><span>Nascimento</span><strong>${nascimentoFmt}</strong></div>
+        <div class="cliente-meta-row"><span>Cliente desde</span><strong>${clienteDesde}</strong></div>
+        <div class="cliente-meta-row"><span>Atendimentos</span><strong>${totalAtendimentos}</strong></div>
+      </div>
+      <div class="cliente-actions">
+        <button class="btn btn-primary btn-sm" onclick="abrirModalAtendimento('${c.id}')">+ Atendimento</button>
+        <button class="btn btn-secondary btn-sm" onclick="abrirModalHistoricoCliente('${c.id}')">📋 Histórico</button>
+        <button class="btn btn-secondary btn-sm" onclick="abrirModalCliente('${c.id}')">✏️</button>
+      </div>
+    </div>`;
+}
+
+/* ─── Verificações de aviso ─── */
+function checarMesAniversario(nascimento) {
+  if (!nascimento) return false;
+  const mesNasc = parseInt(nascimento.split('-')[1]);
+  const mesAtualNum = new Date().getMonth() + 1;
+  return mesNasc === mesAtualNum;
+}
+
+function checarTresMeses(clienteDesde) {
+  if (!clienteDesde) return false;
+  const inicio = new Date(clienteDesde);
+  const hoje = new Date();
+  const diffDias = (hoje - inicio) / (1000 * 60 * 60 * 24);
+  return diffDias >= 90;
+}
+
+/* ─── Modal: Novo / Editar cliente ─── */
+let editandoClienteId = null;
+
+function abrirModalCliente(id = null) {
+  editandoClienteId = id;
+  document.getElementById('modal-cliente-titulo').textContent = id ? 'Editar cliente' : 'Novo cliente';
+
+  if (id) {
+    const clientes = DB.get('clientes_atendimento') || [];
+    const c = clientes.find(x => x.id === id);
+    if (!c) return;
+    document.getElementById('cli-nome').value = c.nome;
+    document.getElementById('cli-tel').value = c.telefone || '';
+    document.getElementById('cli-nascimento').value = c.nascimento || '';
+    document.getElementById('cli-desde').value = c.clienteDesde || '';
+  } else {
+    document.getElementById('cli-nome').value = '';
+    document.getElementById('cli-tel').value = '';
+    document.getElementById('cli-nascimento').value = '';
+    document.getElementById('cli-desde').value = new Date().toISOString().split('T')[0];
+  }
+
+  document.getElementById('modal-cliente').classList.add('open');
+}
+
+function fecharModalCliente() {
+  document.getElementById('modal-cliente').classList.remove('open');
+  editandoClienteId = null;
+}
+
+function salvarCliente() {
+  const nome = document.getElementById('cli-nome').value.trim();
+  const tel = document.getElementById('cli-tel').value.trim();
+  const nascimento = document.getElementById('cli-nascimento').value;
+  const desde = document.getElementById('cli-desde').value;
+
+  if (!nome) {
+    showToast('Informe o nome do cliente', 'error');
+    return;
+  }
+
+  const clientes = DB.get('clientes_atendimento') || [];
+
+  if (editandoClienteId) {
+    const idx = clientes.findIndex(c => c.id === editandoClienteId);
+    if (idx !== -1) {
+      clientes[idx] = { ...clientes[idx], nome, telefone: tel, nascimento, clienteDesde: desde };
+    }
+    showToast('Cliente atualizado');
+  } else {
+    clientes.push({
+      id: gerarId(),
+      nome, telefone: tel, nascimento,
+      clienteDesde: desde || new Date().toISOString().split('T')[0],
+      atendimentos: []
+    });
+    showToast('Cliente cadastrado');
+  }
+
+  DB.set('clientes_atendimento', clientes);
+  fecharModalCliente();
+  renderClientes();
+}
+
+/* ─── Modal: Registrar atendimento ─── */
+let atendimentoClienteId = null;
+let servicosSelecionados = {};
+
+function abrirModalAtendimento(clienteId) {
+  atendimentoClienteId = clienteId;
+  servicosSelecionados = {};
+
+  const clientes = DB.get('clientes_atendimento') || [];
+  const c = clientes.find(x => x.id === clienteId);
+  if (!c) return;
+
+  document.getElementById('atend-cliente-nome-tel').innerHTML =
+    `<strong>${c.nome}</strong> · ${c.telefone || 'sem telefone'}`;
+  document.getElementById('atend-data').value = new Date().toISOString().split('T')[0];
+  document.getElementById('atend-produto-nome').value = '';
+  document.getElementById('atend-produto-valor').value = '';
+
+  // Avisos
+  const avisosEl = document.getElementById('atend-avisos');
+  let avisosHtml = '';
+  if (checarTresMeses(c.clienteDesde)) {
+    avisosHtml += `<div class="aviso-banner aviso-tres-meses">⭐ ${c.nome} já é cliente há 3 meses ou mais!</div>`;
+  }
+  if (checarMesAniversario(c.nascimento)) {
+    avisosHtml += `<div class="aviso-banner aviso-aniversario">🎂 Aniversário de ${c.nome} é neste mês — considere uma cortesia</div>`;
+  }
+  avisosEl.innerHTML = avisosHtml;
+
+  renderServicosChecklist();
+  atualizarTotalAtendimento();
+
+  document.getElementById('modal-atendimento').classList.add('open');
+}
+
+function fecharModalAtendimento() {
+  document.getElementById('modal-atendimento').classList.remove('open');
+  atendimentoClienteId = null;
+  servicosSelecionados = {};
+}
+
+function renderServicosChecklist() {
+  const servicos = DB.get('servicos_precos') || [];
+  const container = document.getElementById('servicos-checklist');
+
+  if (servicos.length === 0) {
+    container.innerHTML = `<div class="servicos-empty">Nenhum serviço cadastrado. Adicione em Configurações.</div>`;
+    return;
+  }
+
+  container.innerHTML = servicos.map(s => `
+    <label class="servico-check-item ${servicosSelecionados[s.id] ? 'checked' : ''}" id="servico-item-${s.id}">
+      <span class="servico-check-left">
+        <input type="checkbox" ${servicosSelecionados[s.id] ? 'checked' : ''}
+          onchange="toggleServico('${s.id}', '${s.nome.replace(/'/g, "\\'")}', ${s.valor})">
+        <span>${s.nome}</span>
+      </span>
+      <span class="servico-check-valor">${formatBRL(s.valor)}</span>
+    </label>
+  `).join('');
+}
+
+function toggleServico(id, nome, valor) {
+  if (servicosSelecionados[id]) {
+    delete servicosSelecionados[id];
+  } else {
+    servicosSelecionados[id] = { nome, valor };
+  }
+  document.getElementById(`servico-item-${id}`).classList.toggle('checked');
+  atualizarTotalAtendimento();
+}
+
+function atualizarTotalAtendimento() {
+  const totalServicos = Object.values(servicosSelecionados).reduce((s, v) => s + v.valor, 0);
+  const produtoValor = parseFloat(document.getElementById('atend-produto-valor').value) || 0;
+  const total = totalServicos + produtoValor;
+  document.getElementById('atend-total-valor').textContent = formatBRL(total);
+}
+
+function salvarAtendimento() {
+  const data = document.getElementById('atend-data').value;
+  const produtoNome = document.getElementById('atend-produto-nome').value.trim();
+  const produtoValor = parseFloat(document.getElementById('atend-produto-valor').value) || 0;
+
+  if (!data) {
+    showToast('Selecione a data do atendimento', 'error');
+    return;
+  }
+
+  const servicosArr = Object.values(servicosSelecionados);
+  if (servicosArr.length === 0 && produtoValor <= 0) {
+    showToast('Selecione ao menos um serviço ou produto', 'error');
+    return;
+  }
+  if (produtoValor > 0 && !produtoNome) {
+    showToast('Informe o nome do produto avulso', 'error');
+    return;
+  }
+
+  const totalServicos = servicosArr.reduce((s, v) => s + v.valor, 0);
+  const total = totalServicos + produtoValor;
+
+  const clientes = DB.get('clientes_atendimento') || [];
+  const idx = clientes.findIndex(c => c.id === atendimentoClienteId);
+  if (idx === -1) return;
+
+  const registro = {
+    id: gerarId(),
+    data,
+    servicos: servicosArr,
+    produto: produtoValor > 0 ? { nome: produtoNome, valor: produtoValor } : null,
+    total
+  };
+
+  clientes[idx].atendimentos = clientes[idx].atendimentos || [];
+  clientes[idx].atendimentos.push(registro);
+  clientes[idx].atendimentos.sort((a, b) => a.data.localeCompare(b.data));
+  DB.set('clientes_atendimento', clientes);
+
+  // Gerar receita financeira
+  const lancamentos = DB.get('lancamentos') || [];
+  const [y, m] = data.split('-');
+  const descricaoItens = [...servicosArr.map(s => s.nome), produtoNome].filter(Boolean).join(', ');
+  lancamentos.push({
+    id: gerarId(),
+    data,
+    tipo: 'receita',
+    categoria: 'Atendimento',
+    valor: total,
+    descricao: `${clientes[idx].nome} — ${descricaoItens}`,
+    mesAno: `${y}-${m}`
+  });
+  lancamentos.sort((a, b) => a.data.localeCompare(b.data));
+  DB.set('lancamentos', lancamentos);
+
+  showToast('Atendimento registrado e receita lançada');
+  fecharModalAtendimento();
+  renderClientes();
+
+  const paginaAtiva = document.querySelector('.page.active')?.id;
+  if (paginaAtiva === 'page-dashboard') renderDashboard();
+}
+
+/* ─── Modal: Histórico de atendimentos do cliente ─── */
+let modalHistClienteId = null;
+
+function abrirModalHistoricoCliente(id) {
+  modalHistClienteId = id;
+  const clientes = DB.get('clientes_atendimento') || [];
+  const c = clientes.find(x => x.id === id);
+  if (!c) return;
+
+  document.getElementById('modal-hist-cliente-titulo').textContent = `Histórico — ${c.nome}`;
+
+  const atendimentos = (c.atendimentos || []).slice().sort((a, b) => b.data.localeCompare(a.data));
+  const lista = document.getElementById('hist-atend-lista');
+
+  if (atendimentos.length === 0) {
+    lista.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">Nenhum atendimento registrado</div>`;
+  } else {
+    lista.innerHTML = atendimentos.map(a => {
+      const tags = [
+        ...a.servicos.map(s => `<span class="hist-atend-tag">${s.nome}</span>`),
+        a.produto ? `<span class="hist-atend-tag">${a.produto.nome}</span>` : ''
+      ].filter(Boolean).join('');
+
+      return `
+        <div class="hist-atend-item">
+          <div class="hist-atend-data">📅 ${formatDataBR(a.data)}</div>
+          <div class="hist-atend-servicos">${tags}</div>
+          <div class="hist-atend-total">
+            <span style="color:var(--text-secondary)">Total</span>
+            <strong>${formatBRL(a.total)}</strong>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  document.getElementById('modal-hist-cliente').classList.add('open');
+}
+
+function fecharModalHistoricoCliente() {
+  document.getElementById('modal-hist-cliente').classList.remove('open');
+  modalHistClienteId = null;
+}
+
+/* ─── Configurações: gestão de serviços precificados ─── */
+function renderServicosConfig() {
+  const servicos = DB.get('servicos_precos') || [];
+  const container = document.getElementById('servico-cfg-list');
+
+  if (servicos.length === 0) {
+    container.innerHTML = `<div style="font-size:12px;color:var(--text-muted);padding:8px 0">Nenhum serviço cadastrado</div>`;
+    return;
+  }
+
+  container.innerHTML = servicos.map(s => `
+    <div class="servico-cfg-row">
+      <input type="text" value="${s.nome}" onchange="editarServicoCfg('${s.id}', 'nome', this.value)">
+      <input type="number" value="${s.valor}" min="0" step="0.01" onchange="editarServicoCfg('${s.id}', 'valor', this.value)">
+      <button class="btn btn-danger btn-sm" onclick="removerServicoCfg('${s.id}')" title="Remover">×</button>
+    </div>
+  `).join('');
+}
+
+function editarServicoCfg(id, campo, valor) {
+  const servicos = DB.get('servicos_precos') || [];
+  const idx = servicos.findIndex(s => s.id === id);
+  if (idx === -1) return;
+  servicos[idx][campo] = campo === 'valor' ? (parseFloat(valor) || 0) : valor;
+  DB.set('servicos_precos', servicos);
+}
+
+function adicionarServicoCfg() {
+  const nomeInput = document.getElementById('novo-servico-nome');
+  const valorInput = document.getElementById('novo-servico-valor');
+  const nome = nomeInput.value.trim();
+  const valor = parseFloat(valorInput.value);
+
+  if (!nome || isNaN(valor) || valor <= 0) {
+    showToast('Preencha nome e valor do serviço', 'error');
+    return;
+  }
+
+  const servicos = DB.get('servicos_precos') || [];
+  servicos.push({ id: gerarId(), nome, valor });
+  DB.set('servicos_precos', servicos);
+  nomeInput.value = '';
+  valorInput.value = '';
+  renderServicosConfig();
+  showToast('Serviço adicionado');
+}
+
+function removerServicoCfg(id) {
+  if (!confirm('Remover este serviço da lista?')) return;
+  const servicos = (DB.get('servicos_precos') || []).filter(s => s.id !== id);
+  DB.set('servicos_precos', servicos);
+  renderServicosConfig();
+}
+
+/* ─── Atualizar navigate, init e backup para incluir clientes ─── */
+const _navigateOriginal2 = navigate;
+navigate = function(pageName) {
+  _navigateOriginal2(pageName);
+  if (pageName === 'clientes') renderClientes();
+  if (pageName === 'configuracoes') renderServicosConfig();
+};
+
+const _exportarJSONOriginal2 = exportarJSON;
+exportarJSON = function() {
+  const dados = {
+    lancamentos:        DB.get('lancamentos') || [],
+    resumos_mensais:    DB.get('resumos_mensais') || [],
+    config:              DB.get('config') || {},
+    clientes_pacotes:   DB.get('clientes_pacotes') || [],
+    clientes_atendimento: DB.get('clientes_atendimento') || [],
+    servicos_precos:    DB.get('servicos_precos') || [],
+    dataExportacao:     new Date().toISOString(),
+    versao: '1.2'
+  };
+  download(`backup-barbearia-${mesAtual()}.json`, 'application/json', JSON.stringify(dados, null, 2));
+  showToast('Backup exportado com sucesso');
+};
+
+const _importarJSONOriginal2 = importarJSON;
+importarJSON = function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const dados = JSON.parse(ev.target.result);
+      if (!dados.lancamentos || !dados.config) throw new Error('Formato inválido');
+      if (!confirm(`Importar backup de ${dados.dataExportacao ? new Date(dados.dataExportacao).toLocaleDateString('pt-BR') : 'data desconhecida'}?\n\nIsso vai substituir todos os dados atuais.`)) return;
+      DB.set('lancamentos',          dados.lancamentos);
+      DB.set('resumos_mensais',      dados.resumos_mensais || []);
+      DB.set('config',                dados.config);
+      DB.set('clientes_pacotes',     dados.clientes_pacotes || []);
+      DB.set('clientes_atendimento', dados.clientes_atendimento || []);
+      DB.set('servicos_precos',      dados.servicos_precos || []);
+      showToast('Backup importado com sucesso');
+      renderConfiguracoes();
+      renderServicosConfig();
+      fecharMesesAnteriores();
+    } catch {
+      showToast('Arquivo inválido ou corrompido', 'error');
+    }
+    e.target.value = '';
+  };
+  reader.readAsText(file);
+};
+

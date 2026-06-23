@@ -19,12 +19,24 @@ function initDefaults() {
       nomeNegocio: 'Minha Barbearia',
       metaMensal: 0,
       alertaLimite: 80,
+      diasInatividade: 40,
+      mensagemRetorno: 'Olá, {nome}! Sentimos sua falta aqui na [nome da barbearia]. Que tal agendar um horário?',
       categorias: [
         'Produtos', 'Aluguel', 'Energia elétrica', 'Água',
         'Salários', 'Comissões', 'Equipamentos', 'Marketing',
         'Serviços terceiros', 'Manutenção', 'Outros'
       ]
     });
+  } else {
+    // Migração: garante os novos campos em configs já existentes
+    const config = DB.get('config');
+    let alterou = false;
+    if (config.diasInatividade === undefined) { config.diasInatividade = 40; alterou = true; }
+    if (config.mensagemRetorno === undefined) {
+      config.mensagemRetorno = 'Olá, {nome}! Sentimos sua falta aqui na [nome da barbearia]. Que tal agendar um horário?';
+      alterou = true;
+    }
+    if (alterou) DB.set('config', config);
   }
   if (!DB.get('lancamentos')) DB.set('lancamentos', []);
   if (!DB.get('resumos_mensais')) DB.set('resumos_mensais', []);
@@ -181,6 +193,9 @@ function renderDashboard() {
       </tr>
     `).join('');
   }
+
+  // Card de clientes inativos
+  renderCardInativosDashboard();
 
   // Gráfico 12 meses
   renderChart12Meses();
@@ -507,6 +522,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initDefaults();
   initPacotes();
   initClientes();
+  initEstoque();
   fecharMesesAnteriores();
 
   const config = DB.get('config') || {};
@@ -887,11 +903,29 @@ function initClientes() {
 }
 
 /* ─── Render principal da aba ─── */
-function renderClientes() {
-  const clientes = DB.get('clientes_atendimento') || [];
-  const busca = (document.getElementById('clientes-busca')?.value || '').toLowerCase();
+let clienteTabAtiva = 'todos';
 
-  let lista = clientes.slice();
+function renderClientes(tab) {
+  if (tab) clienteTabAtiva = tab;
+
+  const clientes = DB.get('clientes_atendimento') || [];
+  const inativos = clientes.filter(c => isClienteInativo(c));
+
+  // Contadores nas abas
+  const elTodos = document.getElementById('tab-count-clientes-todos');
+  const elInativos = document.getElementById('tab-count-clientes-inativos');
+  if (elTodos) elTodos.textContent = clientes.length;
+  if (elInativos) elInativos.textContent = inativos.length;
+
+  // Highlight aba ativa
+  const btnTodos = document.getElementById('tab-btn-clientes-todos');
+  const btnInativos = document.getElementById('tab-btn-clientes-inativos');
+  if (btnTodos) btnTodos.className = 'cliente-tab' + (clienteTabAtiva === 'todos' ? ' active' : '');
+  if (btnInativos) btnInativos.className = 'cliente-tab' + (clienteTabAtiva === 'inativos' ? ' active' : '');
+
+  const busca = (document.getElementById('clientes-busca')?.value || '').toLowerCase();
+  let lista = clienteTabAtiva === 'inativos' ? inativos.slice() : clientes.slice();
+
   if (busca) {
     lista = lista.filter(c =>
       c.nome.toLowerCase().includes(busca) || (c.telefone || '').includes(busca)
@@ -902,10 +936,12 @@ function renderClientes() {
   const grid = document.getElementById('clientes-grid');
 
   if (lista.length === 0) {
+    const msgVazioInativo = 'Nenhum cliente inativo — ótimo sinal!';
+    const msgVazioTodos = clientes.length === 0 ? 'Nenhum cliente cadastrado ainda' : 'Nenhum cliente encontrado';
     grid.innerHTML = `
       <div class="cliente-empty">
-        <div class="empty-icon">👤</div>
-        <p>${clientes.length === 0 ? 'Nenhum cliente cadastrado ainda' : 'Nenhum cliente encontrado'}</p>
+        <div class="empty-icon">${clienteTabAtiva === 'inativos' ? '✅' : '👤'}</div>
+        <p>${clienteTabAtiva === 'inativos' ? msgVazioInativo : msgVazioTodos}</p>
       </div>`;
     return;
   }
@@ -913,31 +949,103 @@ function renderClientes() {
   grid.innerHTML = lista.map(c => renderCardCliente(c)).join('');
 }
 
+/* ─── Cálculo de inatividade ─── */
+function getUltimoAtendimento(c) {
+  const atendimentos = c.atendimentos || [];
+  if (atendimentos.length === 0) return null;
+  return atendimentos.slice().sort((a, b) => b.data.localeCompare(a.data))[0].data;
+}
+
+function getDiasParado(c) {
+  const ultimo = getUltimoAtendimento(c);
+  const referencia = ultimo || c.clienteDesde;
+  if (!referencia) return 0;
+  const dataRef = new Date(referencia);
+  const hoje = new Date();
+  return Math.floor((hoje - dataRef) / (1000 * 60 * 60 * 24));
+}
+
+function getDiasInatividadeConfig() {
+  const config = DB.get('config') || {};
+  return config.diasInatividade || 40;
+}
+
+function isClienteInativo(c) {
+  return getDiasParado(c) >= getDiasInatividadeConfig();
+}
+
+function contarClientesInativos() {
+  const clientes = DB.get('clientes_atendimento') || [];
+  return clientes.filter(c => isClienteInativo(c)).length;
+}
+
+/* ─── WhatsApp ─── */
+function formatarTelefoneWhatsApp(telefone) {
+  let limpo = (telefone || '').replace(/\D/g, '');
+  if (!limpo) return '';
+  if (!limpo.startsWith('55')) limpo = '55' + limpo;
+  return limpo;
+}
+
+function montarMensagemWhatsApp(nomeCliente) {
+  const config = DB.get('config') || {};
+  let msg = config.mensagemRetorno ||
+    'Olá, {nome}! Sentimos sua falta aqui na [nome da barbearia]. Que tal agendar um horário?';
+  msg = msg.replace(/\{nome\}/g, nomeCliente);
+  msg = msg.replace(/\[nome da barbearia\]/g, config.nomeNegocio || 'nossa barbearia');
+  return msg;
+}
+
+function abrirWhatsApp(telefone, nomeCliente) {
+  const numero = formatarTelefoneWhatsApp(telefone);
+  if (!numero) {
+    showToast('Cliente sem telefone cadastrado', 'error');
+    return;
+  }
+  const mensagem = encodeURIComponent(montarMensagemWhatsApp(nomeCliente));
+  window.open(`https://wa.me/${numero}?text=${mensagem}`, '_blank');
+}
+
 function renderCardCliente(c) {
   const isAniversario = checarMesAniversario(c.nascimento);
+  const inativo = isClienteInativo(c);
   const atendimentos = c.atendimentos || [];
   const totalAtendimentos = atendimentos.length;
   const clienteDesde = formatDataBR(c.clienteDesde);
   const nascimentoFmt = c.nascimento ? formatDataBR(c.nascimento) : '—';
+  const ultimo = getUltimoAtendimento(c);
+  const diasParado = getDiasParado(c);
+
+  const cardClass = inativo ? 'inativo' : (isAniversario ? 'aniversario' : '');
+  const nomeEscapado = c.nome.replace(/'/g, "\\'");
+
+  let badges = '';
+  if (isAniversario) badges += '<span class="cliente-badge-aniv">🎂 Aniversário</span>';
+  if (inativo) badges += `<span class="cliente-badge-inativo">⏰ ${diasParado}d parado</span>`;
+
+  const metaInativo = inativo ? `
+      <div class="cliente-meta-row"><span>Último atendimento</span><strong>${ultimo ? formatDataBR(ultimo) : 'Nunca atendido'}</strong></div>` : '';
 
   return `
-    <div class="cliente-card ${isAniversario ? 'aniversario' : ''}">
+    <div class="cliente-card ${cardClass}">
       <div class="cliente-card-header">
         <div>
           <div class="cliente-nome">${c.nome}</div>
           <div class="cliente-tel">${c.telefone || '—'}</div>
         </div>
-        ${isAniversario ? '<span class="cliente-badge-aniv">🎂 Aniversário</span>' : ''}
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">${badges}</div>
       </div>
       <div class="cliente-meta">
         <div class="cliente-meta-row"><span>Nascimento</span><strong>${nascimentoFmt}</strong></div>
         <div class="cliente-meta-row"><span>Cliente desde</span><strong>${clienteDesde}</strong></div>
         <div class="cliente-meta-row"><span>Atendimentos</span><strong>${totalAtendimentos}</strong></div>
+        ${metaInativo}
       </div>
       <div class="cliente-actions">
         <button class="btn btn-primary btn-sm" onclick="abrirModalAtendimento('${c.id}')">+ Atendimento</button>
         <button class="btn btn-secondary btn-sm" onclick="abrirModalHistoricoCliente('${c.id}')">📋 Histórico</button>
         <button class="btn btn-secondary btn-sm" onclick="abrirModalCliente('${c.id}')">✏️</button>
+        <button class="btn btn-whatsapp btn-sm" onclick="abrirWhatsApp('${c.telefone || ''}', '${nomeEscapado}')">💬 WhatsApp</button>
       </div>
     </div>`;
 }
@@ -1133,20 +1241,21 @@ function salvarAtendimento() {
     data,
     servicos: servicosArr,
     produto: produtoValor > 0 ? { nome: produtoNome, valor: produtoValor } : null,
-    total
+    total,
+    lancamentoId: null
   };
 
   clientes[idx].atendimentos = clientes[idx].atendimentos || [];
   clientes[idx].atendimentos.push(registro);
   clientes[idx].atendimentos.sort((a, b) => a.data.localeCompare(b.data));
-  DB.set('clientes_atendimento', clientes);
 
   // Gerar receita financeira
   const lancamentos = DB.get('lancamentos') || [];
   const [y, m] = data.split('-');
   const descricaoItens = [...servicosArr.map(s => s.nome), produtoNome].filter(Boolean).join(', ');
+  const lancamentoId = gerarId();
   lancamentos.push({
-    id: gerarId(),
+    id: lancamentoId,
     data,
     tipo: 'receita',
     categoria: 'Atendimento',
@@ -1156,6 +1265,10 @@ function salvarAtendimento() {
   });
   lancamentos.sort((a, b) => a.data.localeCompare(b.data));
   DB.set('lancamentos', lancamentos);
+
+  // Vincular o lançamento ao registro do atendimento para permitir exclusão precisa
+  registro.lancamentoId = lancamentoId;
+  DB.set('clientes_atendimento', clientes);
 
   showToast('Atendimento registrado e receita lançada');
   fecharModalAtendimento();
@@ -1176,6 +1289,11 @@ function abrirModalHistoricoCliente(id) {
 
   document.getElementById('modal-hist-cliente-titulo').textContent = `Histórico — ${c.nome}`;
 
+  const btnWpp = document.getElementById('btn-whatsapp-hist');
+  if (btnWpp) {
+    btnWpp.onclick = () => abrirWhatsApp(c.telefone || '', c.nome);
+  }
+
   const atendimentos = (c.atendimentos || []).slice().sort((a, b) => b.data.localeCompare(a.data));
   const lista = document.getElementById('hist-atend-lista');
 
@@ -1194,7 +1312,10 @@ function abrirModalHistoricoCliente(id) {
           <div class="hist-atend-servicos">${tags}</div>
           <div class="hist-atend-total">
             <span style="color:var(--text-secondary)">Total</span>
-            <strong>${formatBRL(a.total)}</strong>
+            <div style="display:flex;align-items:center;gap:10px">
+              <strong>${formatBRL(a.total)}</strong>
+              <button class="btn btn-danger btn-sm" onclick="excluirAtendimentoCliente('${a.id}')">Excluir</button>
+            </div>
           </div>
         </div>`;
     }).join('');
@@ -1314,3 +1435,302 @@ importarJSON = function(e) {
   reader.readAsText(file);
 };
 
+
+/* ═══════════════════════════════════════════════
+   CLIENTES INATIVOS — DASHBOARD E NAVEGAÇÃO
+   ═══════════════════════════════════════════════ */
+
+function renderCardInativosDashboard() {
+  const el = document.getElementById('alert-card-inativos');
+  if (!el) return;
+  const total = contarClientesInativos();
+  const dias = getDiasInatividadeConfig();
+
+  el.className = 'alert-card-inativos' + (total === 0 ? ' zero' : '');
+  document.getElementById('inativos-num').textContent = total;
+  document.getElementById('inativos-num').className = 'alert-inativos-num' + (total === 0 ? ' zero' : '');
+  document.getElementById('inativos-hint').textContent =
+    total === 0 ? 'Nenhum cliente parado' : `${dias}+ dias sem atendimento`;
+}
+
+function irParaClientesInativos() {
+  navigate('clientes');
+  renderClientes('inativos');
+}
+
+/* ─── Configurações: inatividade e mensagem WhatsApp ─── */
+function carregarConfigInatividade() {
+  const config = DB.get('config') || {};
+  const elDias = document.getElementById('cfg-dias-inatividade');
+  const elMsg = document.getElementById('cfg-mensagem-retorno');
+  if (elDias) elDias.value = config.diasInatividade || 40;
+  if (elMsg) elMsg.value = config.mensagemRetorno ||
+    'Olá, {nome}! Sentimos sua falta aqui na [nome da barbearia]. Que tal agendar um horário?';
+}
+
+/* ─── Integrar com salvarConfig e renderConfiguracoes existentes ─── */
+const _salvarConfigOriginal = salvarConfig;
+salvarConfig = function() {
+  _salvarConfigOriginal();
+  const config = DB.get('config') || {};
+  const elDias = document.getElementById('cfg-dias-inatividade');
+  const elMsg = document.getElementById('cfg-mensagem-retorno');
+  config.diasInatividade = parseInt(elDias?.value) || 40;
+  config.mensagemRetorno = (elMsg?.value || '').trim() ||
+    'Olá, {nome}! Sentimos sua falta aqui na [nome da barbearia]. Que tal agendar um horário?';
+  DB.set('config', config);
+  renderDashboard.bind(null);
+  const paginaAtiva = document.querySelector('.page.active')?.id;
+  if (paginaAtiva === 'page-dashboard') renderCardInativosDashboard();
+};
+
+const _renderConfiguracoesOriginal = renderConfiguracoes;
+renderConfiguracoes = function() {
+  _renderConfiguracoesOriginal();
+  carregarConfigInatividade();
+};
+
+/* ─── Excluir atendimento (e seu lançamento financeiro correspondente) ─── */
+function excluirAtendimentoCliente(atendimentoId) {
+  if (!confirm('Excluir este atendimento? A receita lançada nos financeiros também será removida.')) return;
+
+  const clientes = DB.get('clientes_atendimento') || [];
+  const idx = clientes.findIndex(c => c.id === modalHistClienteId);
+  if (idx === -1) return;
+  const c = clientes[idx];
+
+  const atendimento = (c.atendimentos || []).find(a => a.id === atendimentoId);
+  if (!atendimento) return;
+
+  // Remover o lançamento financeiro vinculado
+  if (atendimento.lancamentoId) {
+    const lancamentos = (DB.get('lancamentos') || []).filter(l => l.id !== atendimento.lancamentoId);
+    DB.set('lancamentos', lancamentos);
+  }
+
+  // Remover o atendimento do cliente
+  c.atendimentos = (c.atendimentos || []).filter(a => a.id !== atendimentoId);
+  DB.set('clientes_atendimento', clientes);
+
+  showToast('Atendimento e receita removidos');
+  abrirModalHistoricoCliente(modalHistClienteId);
+  renderClientes();
+
+  const paginaAtiva = document.querySelector('.page.active')?.id;
+  if (paginaAtiva === 'page-dashboard') renderDashboard();
+}
+
+/* ═══════════════════════════════════════════════
+   ESTOQUE DE PRODUTOS
+   ═══════════════════════════════════════════════ */
+
+function initEstoque() {
+  if (!DB.get('estoque_produtos')) DB.set('estoque_produtos', []);
+  const config = DB.get('config') || {};
+  if (config.categorias && !config.categorias.includes('Produtos')) {
+    config.categorias.push('Produtos');
+    DB.set('config', config);
+  }
+}
+
+/* ─── Render principal da aba ─── */
+let estoqueTabAtiva = 'estoque';
+
+function renderEstoque(tab) {
+  if (tab) estoqueTabAtiva = tab;
+
+  const todos = DB.get('estoque_produtos') || [];
+  const emEstoque = todos.filter(p => p.qtdRestante > 0);
+  const ultimasCompras = todos.filter(p => p.qtdRestante === 0);
+
+  document.getElementById('tab-count-estoque').textContent = emEstoque.length;
+  document.getElementById('tab-count-ultimas-compras').textContent = ultimasCompras.length;
+
+  document.getElementById('tab-btn-estoque').className = 'estoque-tab' + (estoqueTabAtiva === 'estoque' ? ' active' : '');
+  document.getElementById('tab-btn-ultimas-compras').className = 'estoque-tab' + (estoqueTabAtiva === 'ultimas-compras' ? ' active' : '');
+
+  const busca = (document.getElementById('estoque-busca')?.value || '').toLowerCase();
+  let lista = estoqueTabAtiva === 'estoque' ? emEstoque.slice() : ultimasCompras.slice();
+  if (busca) lista = lista.filter(p => p.nome.toLowerCase().includes(busca));
+
+  lista.sort((a, b) => b.dataCompra.localeCompare(a.dataCompra));
+
+  const grid = document.getElementById('estoque-grid');
+
+  if (lista.length === 0) {
+    grid.innerHTML = `
+      <div class="estoque-empty">
+        <div class="empty-icon">${estoqueTabAtiva === 'estoque' ? '📦' : '🗃️'}</div>
+        <p>${estoqueTabAtiva === 'estoque' ? 'Nenhum produto em estoque' : 'Nenhuma compra esgotada ainda'}</p>
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = lista.map(p => renderCardEstoque(p)).join('');
+}
+
+function renderCardEstoque(p) {
+  const pct = Math.min((p.qtdRestante / p.qtdTotal) * 100, 100);
+  const esgotado = p.qtdRestante === 0;
+  const baixo = !esgotado && pct <= 20;
+
+  const cardClass = esgotado ? 'esgotado' : (baixo ? 'baixo' : '');
+  const fillClass = esgotado ? 'esgotado' : (baixo ? 'baixo' : '');
+
+  const botaoDecremento = esgotado ? '' : `
+    <button class="btn-decremento" onclick="decrementarEstoque('${p.id}')" title="Dar baixa de 1 unidade">−1</button>`;
+
+  return `
+    <div class="estoque-card ${cardClass}">
+      <div class="estoque-card-header">
+        <div>
+          <div class="estoque-nome">${p.nome}</div>
+          <div class="estoque-data-compra">Comprado em ${formatDataBR(p.dataCompra)}</div>
+        </div>
+        ${esgotado ? '<span class="estoque-badge-esgotado">Esgotado</span>' : ''}
+      </div>
+      <div class="estoque-valor-lote">${formatBRL(p.valorTotal)} pelo lote</div>
+      <div class="estoque-qtd-label">
+        <span>${p.qtdRestante} de ${p.qtdTotal} unidades</span>
+        <span>${esgotado ? 'Esgotado' : Math.round(pct) + '%'}</span>
+      </div>
+      <div class="estoque-qtd-bar">
+        <div class="estoque-qtd-fill ${fillClass}" style="width:${pct}%"></div>
+      </div>
+      <div class="estoque-actions">
+        ${botaoDecremento}
+      </div>
+    </div>`;
+}
+
+/* ─── Decremento manual (sem gerar lançamento) ─── */
+function decrementarEstoque(id) {
+  const produtos = DB.get('estoque_produtos') || [];
+  const idx = produtos.findIndex(p => p.id === id);
+  if (idx === -1) return;
+
+  const p = produtos[idx];
+  if (p.qtdRestante <= 0) return;
+
+  p.qtdRestante -= 1;
+
+  if (p.qtdRestante === 0) {
+    showToast(`${p.nome} esgotado — movido para Últimas compras`);
+  } else {
+    showToast(`${p.nome}: ${p.qtdRestante} restantes`);
+  }
+
+  DB.set('estoque_produtos', produtos);
+  renderEstoque();
+}
+
+/* ─── Modal: Novo produto ─── */
+function abrirModalEstoque() {
+  document.getElementById('estq-nome').value = '';
+  document.getElementById('estq-qtd').value = '';
+  document.getElementById('estq-valor').value = '';
+  document.getElementById('estq-data').value = new Date().toISOString().split('T')[0];
+  document.getElementById('modal-estoque').classList.add('open');
+}
+
+function fecharModalEstoque() {
+  document.getElementById('modal-estoque').classList.remove('open');
+}
+
+function salvarProdutoEstoque() {
+  const nome = document.getElementById('estq-nome').value.trim();
+  const qtd = parseInt(document.getElementById('estq-qtd').value);
+  const valor = parseFloat(document.getElementById('estq-valor').value);
+  const data = document.getElementById('estq-data').value;
+
+  if (!nome || isNaN(qtd) || qtd <= 0 || isNaN(valor) || valor <= 0 || !data) {
+    showToast('Preencha todos os campos corretamente', 'error');
+    return;
+  }
+
+  const produtos = DB.get('estoque_produtos') || [];
+  produtos.push({
+    id: gerarId(),
+    nome,
+    qtdTotal: qtd,
+    qtdRestante: qtd,
+    valorTotal: valor,
+    dataCompra: data
+  });
+  DB.set('estoque_produtos', produtos);
+
+  // Gerar despesa financeira
+  const lancamentos = DB.get('lancamentos') || [];
+  const [y, m] = data.split('-');
+  lancamentos.push({
+    id: gerarId(),
+    data,
+    tipo: 'despesa',
+    categoria: 'Produtos',
+    valor,
+    descricao: `Compra de estoque: ${nome} (${qtd} unidades)`,
+    mesAno: `${y}-${m}`
+  });
+  lancamentos.sort((a, b) => a.data.localeCompare(b.data));
+  DB.set('lancamentos', lancamentos);
+
+  showToast('Produto cadastrado e despesa lançada');
+  fecharModalEstoque();
+  renderEstoque('estoque');
+
+  const paginaAtiva = document.querySelector('.page.active')?.id;
+  if (paginaAtiva === 'page-dashboard') renderDashboard();
+}
+
+/* ─── Integrar navigate e backup ─── */
+const _navigateOriginal3 = navigate;
+navigate = function(pageName) {
+  _navigateOriginal3(pageName);
+  if (pageName === 'estoque') renderEstoque();
+};
+
+const _exportarJSONOriginal3 = exportarJSON;
+exportarJSON = function() {
+  const dados = {
+    lancamentos:           DB.get('lancamentos') || [],
+    resumos_mensais:       DB.get('resumos_mensais') || [],
+    config:                 DB.get('config') || {},
+    clientes_pacotes:      DB.get('clientes_pacotes') || [],
+    clientes_atendimento:  DB.get('clientes_atendimento') || [],
+    servicos_precos:       DB.get('servicos_precos') || [],
+    estoque_produtos:      DB.get('estoque_produtos') || [],
+    dataExportacao:        new Date().toISOString(),
+    versao: '1.3'
+  };
+  download(`backup-barbearia-${mesAtual()}.json`, 'application/json', JSON.stringify(dados, null, 2));
+  showToast('Backup exportado com sucesso');
+};
+
+const _importarJSONOriginal3 = importarJSON;
+importarJSON = function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const dados = JSON.parse(ev.target.result);
+      if (!dados.lancamentos || !dados.config) throw new Error('Formato inválido');
+      if (!confirm(`Importar backup de ${dados.dataExportacao ? new Date(dados.dataExportacao).toLocaleDateString('pt-BR') : 'data desconhecida'}?\n\nIsso vai substituir todos os dados atuais.`)) return;
+      DB.set('lancamentos',          dados.lancamentos);
+      DB.set('resumos_mensais',      dados.resumos_mensais || []);
+      DB.set('config',                dados.config);
+      DB.set('clientes_pacotes',     dados.clientes_pacotes || []);
+      DB.set('clientes_atendimento', dados.clientes_atendimento || []);
+      DB.set('servicos_precos',      dados.servicos_precos || []);
+      DB.set('estoque_produtos',     dados.estoque_produtos || []);
+      showToast('Backup importado com sucesso');
+      renderConfiguracoes();
+      renderServicosConfig();
+      fecharMesesAnteriores();
+    } catch {
+      showToast('Arquivo inválido ou corrompido', 'error');
+    }
+    e.target.value = '';
+  };
+  reader.readAsText(file);
+};

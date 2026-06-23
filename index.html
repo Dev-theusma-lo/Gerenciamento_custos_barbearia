@@ -37,6 +37,9 @@
       <button class="nav-item" data-page="pacotes" onclick="navigate('pacotes')">
         <span class="icon">👤</span><span>Pacotes</span>
       </button>
+      <button class="nav-item" data-page="estoque" onclick="navigate('estoque')">
+        <span class="icon">📦</span><span>Estoque</span>
+      </button>
       <button class="nav-item" data-page="configuracoes" onclick="navigate('configuracoes')">
         <span class="icon">⚙️</span><span>Configurações</span>
       </button>
@@ -76,6 +79,15 @@
           <div class="stat-value" id="dash-lucro">R$ 0,00</div>
           <div class="stat-icon">📊</div>
         </div>
+      </div>
+
+      <div class="alert-card-inativos" id="alert-card-inativos" onclick="irParaClientesInativos()">
+        <div class="alert-inativos-info">
+          <span class="alert-inativos-label">Clientes inativos</span>
+          <span class="alert-inativos-num" id="inativos-num">0</span>
+          <span class="alert-inativos-hint" id="inativos-hint">Carregando...</span>
+        </div>
+        <div class="alert-inativos-icon">⏰</div>
       </div>
 
       <div class="dash-stats-row2">
@@ -254,6 +266,26 @@
       </div>
 
       <div class="config-section">
+        <h3>Clientes inativos e WhatsApp</h3>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="cfg-dias-inatividade">Dias para inatividade</label>
+            <input type="number" id="cfg-dias-inatividade" placeholder="Ex: 40" min="1" step="1">
+            <span class="config-hint">Cliente sem atendimento há este número de dias entra na lista de inativos.</span>
+          </div>
+          <div class="form-group full">
+            <label for="cfg-mensagem-retorno">Mensagem de retorno</label>
+            <textarea id="cfg-mensagem-retorno" class="config-textarea"
+              placeholder="Olá, {nome}! Sentimos sua falta aqui na [nome da barbearia]. Que tal agendar um horário?"></textarea>
+            <span class="config-hint">Use {nome} para o nome do cliente. [nome da barbearia] é substituído automaticamente.</span>
+          </div>
+        </div>
+        <div style="margin-top:16px">
+          <button class="btn btn-primary" onclick="salvarConfig()">Salvar configurações</button>
+        </div>
+      </div>
+
+      <div class="config-section">
         <h3>Serviços e valores (para atendimentos)</h3>
         <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
           Esses serviços aparecem como checklist ao registrar um atendimento de cliente.
@@ -304,6 +336,15 @@
         <button class="btn btn-primary" onclick="abrirModalCliente()">+ Novo cliente</button>
       </div>
 
+      <div class="clientes-tabs">
+        <button class="cliente-tab active" id="tab-btn-clientes-todos" onclick="renderClientes('todos')">
+          Todos <span class="tab-count" id="tab-count-clientes-todos">0</span>
+        </button>
+        <button class="cliente-tab" id="tab-btn-clientes-inativos" onclick="renderClientes('inativos')">
+          Inativos <span class="tab-count" id="tab-count-clientes-inativos">0</span>
+        </button>
+      </div>
+
       <div class="clientes-busca">
         <input type="text" id="clientes-busca" placeholder="Buscar por nome ou telefone..."
           oninput="renderClientes()">
@@ -348,6 +389,38 @@
         <div class="pacote-empty">
           <div class="empty-icon">👤</div>
           <p>Nenhum cliente ainda</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ESTOQUE DE PRODUTOS -->
+    <section class="page" id="page-estoque">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px">
+        <div>
+          <h2 class="page-title">Estoque</h2>
+          <p class="page-subtitle">Controle de produtos comprados para a barbearia</p>
+        </div>
+        <button class="btn btn-primary" onclick="abrirModalEstoque()">+ Adicionar produto</button>
+      </div>
+
+      <div class="estoque-tabs">
+        <button class="estoque-tab active" id="tab-btn-estoque" onclick="renderEstoque('estoque')">
+          Em estoque <span class="tab-count" id="tab-count-estoque">0</span>
+        </button>
+        <button class="estoque-tab" id="tab-btn-ultimas-compras" onclick="renderEstoque('ultimas-compras')">
+          Últimas compras <span class="tab-count" id="tab-count-ultimas-compras">0</span>
+        </button>
+      </div>
+
+      <div class="estoque-busca-row">
+        <input type="text" id="estoque-busca" placeholder="Buscar produto..."
+          oninput="renderEstoque()">
+      </div>
+
+      <div class="estoque-grid" id="estoque-grid">
+        <div class="estoque-empty">
+          <div class="empty-icon">📦</div>
+          <p>Nenhum produto em estoque</p>
         </div>
       </div>
     </section>
@@ -527,7 +600,37 @@
     <h2 id="modal-hist-cliente-titulo">Histórico</h2>
     <div class="hist-atend-lista" id="hist-atend-lista"></div>
     <div class="modal-actions">
+      <button class="btn btn-whatsapp" id="btn-whatsapp-hist" onclick="">💬 WhatsApp</button>
       <button class="btn btn-secondary" onclick="fecharModalHistoricoCliente()">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: NOVO PRODUTO DE ESTOQUE -->
+<div class="modal-overlay" id="modal-estoque">
+  <div class="modal">
+    <h2>Adicionar produto ao estoque</h2>
+    <div class="form-grid">
+      <div class="form-group full">
+        <label for="estq-nome">Nome do produto *</label>
+        <input type="text" id="estq-nome" placeholder="Ex: Pomada modeladora">
+      </div>
+      <div class="form-group">
+        <label for="estq-qtd">Quantidade comprada *</label>
+        <input type="number" id="estq-qtd" placeholder="Ex: 20" min="1" step="1">
+      </div>
+      <div class="form-group">
+        <label for="estq-valor">Valor total do lote (R$) *</label>
+        <input type="number" id="estq-valor" placeholder="0,00" min="0" step="0.01">
+      </div>
+      <div class="form-group full">
+        <label for="estq-data">Data da compra</label>
+        <input type="date" id="estq-data">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="fecharModalEstoque()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarProdutoEstoque()">Salvar</button>
     </div>
   </div>
 </div>

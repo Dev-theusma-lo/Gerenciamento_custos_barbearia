@@ -150,6 +150,8 @@
       </div>
 
       <div class="filters">
+        <input type="text" id="hist-busca-descricao" placeholder="Buscar na descrição..."
+          oninput="aplicarFiltrosHistorico()" style="max-width:220px">
         <select id="hist-filtro-mes" onchange="aplicarFiltrosHistorico()">
           <option value="">Todos os meses</option>
         </select>
@@ -395,12 +397,24 @@
 
     <!-- ESTOQUE DE PRODUTOS -->
     <section class="page" id="page-estoque">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px">
-        <div>
-          <h2 class="page-title">Estoque</h2>
-          <p class="page-subtitle">Controle de produtos comprados para a barbearia</p>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:20px">
+        <h2 class="page-title" style="margin-bottom:0;white-space:nowrap">Estoque</h2>
+        <div class="dash-stats dash-stats-row-compact">
+          <div class="stat-card despesa">
+            <div class="stat-label">Despesas</div>
+            <div class="stat-value neutral" id="estoque-dash-despesa">R$ 0,00</div>
+          </div>
+          <div class="stat-card receita">
+            <div class="stat-label">Receitas</div>
+            <div class="stat-value positive" id="estoque-dash-receita">R$ 0,00</div>
+            
+          </div>
+          <div class="stat-card lucro">
+            <div class="stat-label">Lucro total</div>
+            <div class="stat-value" id="estoque-dash-lucro">R$ 0,00</div>
+
+          </div>
         </div>
-        <button class="btn btn-primary" onclick="abrirModalEstoque()">+ Adicionar produto</button>
       </div>
 
       <div class="estoque-tabs">
@@ -415,13 +429,23 @@
       <div class="estoque-busca-row">
         <input type="text" id="estoque-busca" placeholder="Buscar produto..."
           oninput="renderEstoque()">
+        <button class="btn btn-primary" onclick="abrirModalEstoque()">+ Adicionar produto</button>
       </div>
 
-      <div class="estoque-grid" id="estoque-grid">
-        <div class="estoque-empty">
-          <div class="empty-icon">📦</div>
-          <p>Nenhum produto em estoque</p>
-        </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Produto</th>
+              <th>Qtd. restante</th>
+              <th>Valor de venda</th>
+              <th style="text-align:right">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="estoque-tbody">
+            <tr><td colspan="4" style="text-align:center;padding:32px;color:var(--text-muted)">Carregando...</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -570,16 +594,11 @@
     <label style="margin-bottom:8px;display:block">Serviços prestados</label>
     <div class="servicos-checklist" id="servicos-checklist"></div>
 
-    <div class="produto-avulso-row">
-      <div class="form-group">
-        <label for="atend-produto-nome">Produto avulso (opcional)</label>
-        <input type="text" id="atend-produto-nome" placeholder="Ex: Pomada modeladora">
-      </div>
-      <div class="form-group">
-        <label for="atend-produto-valor">Valor (R$)</label>
-        <input type="number" id="atend-produto-valor" placeholder="0,00" min="0" step="0.01"
-          oninput="atualizarTotalAtendimento()">
-      </div>
+    <label style="margin:14px 0 8px;display:block">Produtos do estoque (opcional)</label>
+    <div class="produtos-estoque-lista" id="produtos-estoque-lista"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <select id="atend-select-produto-estoque" style="flex:1"></select>
+      <button class="btn btn-secondary btn-sm" onclick="adicionarProdutoEstoqueAtendimento()">+ Adicionar</button>
     </div>
 
     <div class="atend-total">
@@ -600,7 +619,7 @@
     <h2 id="modal-hist-cliente-titulo">Histórico</h2>
     <div class="hist-atend-lista" id="hist-atend-lista"></div>
     <div class="modal-actions">
-      <button class="btn btn-whatsapp" id="btn-whatsapp-hist" onclick="">💬 WhatsApp</button>
+      <button class="btn btn-whatsapp" id="btn-whatsapp-hist" onclick="">WhatsApp</button>
       <button class="btn btn-secondary" onclick="fecharModalHistoricoCliente()">Fechar</button>
     </div>
   </div>
@@ -623,6 +642,10 @@
         <label for="estq-valor">Valor total do lote (R$) *</label>
         <input type="number" id="estq-valor" placeholder="0,00" min="0" step="0.01">
       </div>
+      <div class="form-group">
+        <label for="estq-valor-venda">Valor de venda (R$) *</label>
+        <input type="number" id="estq-valor-venda" placeholder="0,00" min="0" step="0.01">
+      </div>
       <div class="form-group full">
         <label for="estq-data">Data da compra</label>
         <input type="date" id="estq-data">
@@ -631,6 +654,35 @@
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="fecharModalEstoque()">Cancelar</button>
       <button class="btn btn-primary" onclick="salvarProdutoEstoque()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: DETALHES DO PRODUTO DE ESTOQUE -->
+<div class="modal-overlay" id="modal-estoque-detalhes">
+  <div class="modal" style="max-width:420px">
+    <h2 id="estd-titulo">Detalhes do produto</h2>
+    <div class="estoque-detalhes-grid">
+      <div class="estoque-detalhe-item">
+        <span class="estoque-detalhe-label">Despesa total do lote</span>
+        <span class="estoque-detalhe-valor" id="estd-despesa-total">R$ 0,00</span>
+      </div>
+      <div class="estoque-detalhe-item">
+        <span class="estoque-detalhe-label">Valor de venda (unidade)</span>
+        <span class="estoque-detalhe-valor" id="estd-valor-venda">R$ 0,00</span>
+      </div>
+      <div class="estoque-detalhe-item">
+        <span class="estoque-detalhe-label">Quantidade vendida</span>
+        <span class="estoque-detalhe-valor" id="estd-qtd-vendida">0</span>
+      </div>
+      <div class="estoque-detalhe-item">
+        <span class="estoque-detalhe-label">Lucro do produto</span>
+        <span class="estoque-detalhe-valor" id="estd-lucro">R$ 0,00</span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-danger" onclick="excluirProdutoEstoque()">Excluir produto</button>
+      <button class="btn btn-secondary" onclick="fecharModalEstoqueDetalhes()">Fechar</button>
     </div>
   </div>
 </div>

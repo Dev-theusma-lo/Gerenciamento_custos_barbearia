@@ -72,14 +72,14 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .sidebar-brand h1 {
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.3px;
   line-height: 1.3;
 }
 .sidebar-brand span {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -113,7 +113,6 @@ body {
 .nav-item.active {
   background: rgba(221,151,0,0.12);
   color: #dd9700;
-  font-weight: 500;
 }
 .nav-item .icon { font-size: 16px; width: 18px; text-align: center; flex-shrink: 0; }
 
@@ -142,7 +141,6 @@ body {
 }
 .page-subtitle {
   font-size: 13px;
-  margin-left: 4px;
   color: var(--text-secondary);
   margin-bottom: 24px;
 }
@@ -1120,9 +1118,11 @@ tbody td { padding: 11px 14px; color: var(--text-primary); }
 }
 
 .btn-whatsapp {
-  background: rgba(78,205,196,0.12);
-  color: var(--teal-1);
-  border: 1px solid rgba(78,205,196,0.3);
+  background: rgb(37, 211, 102);
+  color: rgb(221, 220, 220);
+  font-weight: bold;
+  
+  border: 1px solid rgb(30, 180, 85);
 }
 .btn-whatsapp:hover { opacity: 0.85; }
 
@@ -1192,10 +1192,11 @@ tbody td { padding: 11px 14px; color: var(--text-primary); }
   border-radius: var(--radius-md);
   padding: 4px;
   width: fit-content;
+  margin-top: 7%;
   margin-bottom: 20px;
 }
 .estoque-tab {
-  padding: 7px 18px;
+  padding: 7px 20px;
   border-radius: var(--radius-sm);
   border: none;
   background: none;
@@ -1227,10 +1228,12 @@ tbody td { padding: 11px 14px; color: var(--text-primary); }
 
 .estoque-busca-row {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 10px;
   margin-bottom: 20px;
 }
-.estoque-busca-row input { max-width: 300px; }
+.estoque-busca-row input { max-width: 400px; }
 
 .estoque-grid {
   display: grid;
@@ -1405,7 +1408,92 @@ tbody td { padding: 11px 14px; color: var(--text-primary); }
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  margin-left: 6px;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .btn-decremento:hover { border-color: var(--red); background: rgba(224,85,85,0.1); color: var(--red); }
 .btn-decremento:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ─── MODAL DETALHES DO ESTOQUE ─── */
+.estoque-detalhes-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0;
+}
+.estoque-detalhe-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+.estoque-detalhe-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.estoque-detalhe-valor {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ─── PRODUTOS DO ESTOQUE NO ATENDIMENTO ─── */
+.produtos-estoque-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.produto-estoque-item {
+  display: grid;
+  grid-template-columns: 1fr 70px 90px 28px;
+  gap: 8px;
+  align-items: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.produto-estoque-item .pe-nome { color: var(--text-primary); }
+.produto-estoque-item .pe-disponivel { color: var(--text-muted); font-size: 11px; }
+.produto-estoque-item input[type="number"] {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.produto-estoque-item button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.produto-estoque-item button:hover { color: var(--red); }
+
+/* ─── LUCRO (estoque + dashboard de produtos) ─── */
+.lucro-positivo { color: var(--cor-receita) !important; }
+.lucro-negativo { color: var(--cor-despesa) !important; }
+
+/* ─── Dash-stats compacto ao lado do título (aba Estoque) ─── */
+.dash-stats-row-compact {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  margin-bottom: 0;
+  margin-left: 200px;
+  flex: 1;
+}
+.dash-stats-row-compact .stat-card {
+  flex: 1;
+  padding: 10px 10px;
+  max-width: 50%;
+}
+.dash-stats-row-compact .stat-label { font-size: 9px; font-weight: 100; text-align: center;}
+.dash-stats-row-compact .stat-value { font-size: 14px; text-align: center;}
+.dash-stats-row-compact .stat-icon { font-size: 16px; right: 10px; top: 10px; }
+
+@media (max-width: 900px) {
+  .dash-stats-row-compact { flex-direction: column; }
+}

@@ -329,11 +329,13 @@ function renderHistorico() {
 
 function aplicarFiltrosHistorico() {
   const lancamentos = DB.get('lancamentos') || [];
+  const busca      = (document.getElementById('hist-busca-descricao')?.value || '').toLowerCase().trim();
   const filtroMes  = document.getElementById('hist-filtro-mes').value;
   const filtroTipo = document.getElementById('hist-filtro-tipo').value;
   const filtroCat  = document.getElementById('hist-filtro-cat').value;
 
   let filtrados = lancamentos.slice().reverse();
+  if (busca)      filtrados = filtrados.filter(l => (l.descricao || '').toLowerCase().includes(busca));
   if (filtroMes)  filtrados = filtrados.filter(l => l.mesAno === filtroMes);
   if (filtroTipo) filtrados = filtrados.filter(l => l.tipo === filtroTipo);
   if (filtroCat)  filtrados = filtrados.filter(l => l.categoria === filtroCat);
@@ -1045,7 +1047,7 @@ function renderCardCliente(c) {
         <button class="btn btn-primary btn-sm" onclick="abrirModalAtendimento('${c.id}')">+ Atendimento</button>
         <button class="btn btn-secondary btn-sm" onclick="abrirModalHistoricoCliente('${c.id}')">📋 Histórico</button>
         <button class="btn btn-secondary btn-sm" onclick="abrirModalCliente('${c.id}')">✏️</button>
-        <button class="btn btn-whatsapp btn-sm" onclick="abrirWhatsApp('${c.telefone || ''}', '${nomeEscapado}')">💬 WhatsApp</button>
+        <button class="btn btn-whatsapp btn-sm" onclick="abrirWhatsApp('${c.telefone || ''}', '${nomeEscapado}')">WhatsApp</button>
       </div>
     </div>`;
 }
@@ -1058,11 +1060,11 @@ function checarMesAniversario(nascimento) {
   return mesNasc === mesAtualNum;
 }
 
-function checarTresMeses(clienteDesde) {
-  if (!clienteDesde) return false;
-  const inicio = new Date(clienteDesde);
+function checarTresMeses(marcoTresMeses) {
+  if (!marcoTresMeses) return false;
+  const marco = new Date(marcoTresMeses);
   const hoje = new Date();
-  const diffDias = (hoje - inicio) / (1000 * 60 * 60 * 24);
+  const diffDias = (hoje - marco) / (1000 * 60 * 60 * 24);
   return diffDias >= 90;
 }
 
@@ -1108,6 +1110,8 @@ function salvarCliente() {
   }
 
   const clientes = DB.get('clientes_atendimento') || [];
+  const isNovo = !editandoClienteId;
+  let novoClienteId = null;
 
   if (editandoClienteId) {
     const idx = clientes.findIndex(c => c.id === editandoClienteId);
@@ -1116,10 +1120,13 @@ function salvarCliente() {
     }
     showToast('Cliente atualizado');
   } else {
+    novoClienteId = gerarId();
+    const dataCadastro = desde || new Date().toISOString().split('T')[0];
     clientes.push({
-      id: gerarId(),
+      id: novoClienteId,
       nome, telefone: tel, nascimento,
-      clienteDesde: desde || new Date().toISOString().split('T')[0],
+      clienteDesde: dataCadastro,
+      marcoTresMeses: dataCadastro,
       atendimentos: []
     });
     showToast('Cliente cadastrado');
@@ -1128,15 +1135,22 @@ function salvarCliente() {
   DB.set('clientes_atendimento', clientes);
   fecharModalCliente();
   renderClientes();
+
+  if (isNovo && novoClienteId) {
+    abrirModalAtendimento(novoClienteId);
+  }
 }
 
 /* ─── Modal: Registrar atendimento ─── */
 let atendimentoClienteId = null;
 let servicosSelecionados = {};
+let produtosEstoqueSelecionados = []; // [{ produtoId, nome, qtd, qtdDisponivel, valorUnitario }]
+let avisoTresMesesAtivoNesteAtendimento = false;
 
 function abrirModalAtendimento(clienteId) {
   atendimentoClienteId = clienteId;
   servicosSelecionados = {};
+  produtosEstoqueSelecionados = [];
 
   const clientes = DB.get('clientes_atendimento') || [];
   const c = clientes.find(x => x.id === clienteId);
@@ -1145,14 +1159,15 @@ function abrirModalAtendimento(clienteId) {
   document.getElementById('atend-cliente-nome-tel').innerHTML =
     `<strong>${c.nome}</strong> · ${c.telefone || 'sem telefone'}`;
   document.getElementById('atend-data').value = new Date().toISOString().split('T')[0];
-  document.getElementById('atend-produto-nome').value = '';
-  document.getElementById('atend-produto-valor').value = '';
 
   // Avisos
+  const marco = c.marcoTresMeses || c.clienteDesde; // fallback para clientes cadastrados antes desta feature
+  avisoTresMesesAtivoNesteAtendimento = checarTresMeses(marco);
+
   const avisosEl = document.getElementById('atend-avisos');
   let avisosHtml = '';
-  if (checarTresMeses(c.clienteDesde)) {
-    avisosHtml += `<div class="aviso-banner aviso-tres-meses">⭐ ${c.nome} já é cliente há 3 meses ou mais!</div>`;
+  if (avisoTresMesesAtivoNesteAtendimento) {
+    avisosHtml += `<div class="aviso-banner aviso-tres-meses">⭐ ${c.nome} completou 3 meses sem atendimento!</div>`;
   }
   if (checarMesAniversario(c.nascimento)) {
     avisosHtml += `<div class="aviso-banner aviso-aniversario">🎂 Aniversário de ${c.nome} é neste mês — considere uma cortesia</div>`;
@@ -1160,6 +1175,8 @@ function abrirModalAtendimento(clienteId) {
   avisosEl.innerHTML = avisosHtml;
 
   renderServicosChecklist();
+  renderSelectProdutosEstoque();
+  renderProdutosEstoqueLista();
   atualizarTotalAtendimento();
 
   document.getElementById('modal-atendimento').classList.add('open');
@@ -1169,6 +1186,8 @@ function fecharModalAtendimento() {
   document.getElementById('modal-atendimento').classList.remove('open');
   atendimentoClienteId = null;
   servicosSelecionados = {};
+  produtosEstoqueSelecionados = [];
+  avisoTresMesesAtivoNesteAtendimento = false;
 }
 
 function renderServicosChecklist() {
@@ -1202,17 +1221,101 @@ function toggleServico(id, nome, valor) {
   atualizarTotalAtendimento();
 }
 
+/* ─── Produtos do estoque dentro do atendimento ─── */
+function renderSelectProdutosEstoque() {
+  const select = document.getElementById('atend-select-produto-estoque');
+  const produtos = (DB.get('estoque_produtos') || []).filter(p => p.qtdRestante > 0);
+  const jaSelecionados = new Set(produtosEstoqueSelecionados.map(p => p.produtoId));
+  const disponiveis = produtos.filter(p => !jaSelecionados.has(p.id));
+
+  if (disponiveis.length === 0) {
+    select.innerHTML = `<option value="">Nenhum produto disponível</option>`;
+    return;
+  }
+  select.innerHTML = `<option value="">Selecione um produto...</option>` +
+    disponiveis.map(p => `<option value="${p.id}">${p.nome} (${p.qtdRestante} disp.)</option>`).join('');
+}
+
+function adicionarProdutoEstoqueAtendimento() {
+  const select = document.getElementById('atend-select-produto-estoque');
+  const produtoId = select.value;
+  if (!produtoId) return;
+
+  const produtos = DB.get('estoque_produtos') || [];
+  const p = produtos.find(x => x.id === produtoId);
+  if (!p || p.qtdRestante <= 0) return;
+
+  produtosEstoqueSelecionados.push({
+    produtoId: p.id,
+    nome: p.nome,
+    qtd: 1,
+    qtdDisponivel: p.qtdRestante,
+    valorUnitario: p.valorVenda || 0
+  });
+
+  renderSelectProdutosEstoque();
+  renderProdutosEstoqueLista();
+  atualizarTotalAtendimento();
+}
+
+function renderProdutosEstoqueLista() {
+  const container = document.getElementById('produtos-estoque-lista');
+  if (produtosEstoqueSelecionados.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = produtosEstoqueSelecionados.map((item, idx) => `
+    <div class="produto-estoque-item">
+      <div>
+        <div class="pe-nome">${item.nome}</div>
+        <div class="pe-disponivel">${item.qtdDisponivel} disponíveis</div>
+      </div>
+      <input type="number" min="1" max="${item.qtdDisponivel}" value="${item.qtd}"
+        oninput="atualizarQtdProdutoEstoque(${idx}, this.value)">
+      <input type="number" min="0" step="0.01" value="${item.valorUnitario}"
+        oninput="atualizarValorProdutoEstoque(${idx}, this.value)">
+      <button onclick="removerProdutoEstoqueAtendimento(${idx})" title="Remover">×</button>
+    </div>
+  `).join('');
+}
+
+function atualizarQtdProdutoEstoque(idx, valor) {
+  const item = produtosEstoqueSelecionados[idx];
+  if (!item) return;
+  let qtd = parseInt(valor);
+  if (isNaN(qtd) || qtd < 1) qtd = 1;
+  if (qtd > item.qtdDisponivel) {
+    qtd = item.qtdDisponivel;
+    showToast(`Apenas ${item.qtdDisponivel} unidades disponíveis`, 'error');
+  }
+  item.qtd = qtd;
+  renderProdutosEstoqueLista();
+  atualizarTotalAtendimento();
+}
+
+function atualizarValorProdutoEstoque(idx, valor) {
+  const item = produtosEstoqueSelecionados[idx];
+  if (!item) return;
+  item.valorUnitario = parseFloat(valor) || 0;
+  atualizarTotalAtendimento();
+}
+
+function removerProdutoEstoqueAtendimento(idx) {
+  produtosEstoqueSelecionados.splice(idx, 1);
+  renderSelectProdutosEstoque();
+  renderProdutosEstoqueLista();
+  atualizarTotalAtendimento();
+}
+
 function atualizarTotalAtendimento() {
   const totalServicos = Object.values(servicosSelecionados).reduce((s, v) => s + v.valor, 0);
-  const produtoValor = parseFloat(document.getElementById('atend-produto-valor').value) || 0;
-  const total = totalServicos + produtoValor;
+  const totalProdutosEstoque = produtosEstoqueSelecionados.reduce((s, p) => s + (p.qtd * p.valorUnitario), 0);
+  const total = totalServicos + totalProdutosEstoque;
   document.getElementById('atend-total-valor').textContent = formatBRL(total);
 }
 
 function salvarAtendimento() {
   const data = document.getElementById('atend-data').value;
-  const produtoNome = document.getElementById('atend-produto-nome').value.trim();
-  const produtoValor = parseFloat(document.getElementById('atend-produto-valor').value) || 0;
 
   if (!data) {
     showToast('Selecione a data do atendimento', 'error');
@@ -1220,27 +1323,38 @@ function salvarAtendimento() {
   }
 
   const servicosArr = Object.values(servicosSelecionados);
-  if (servicosArr.length === 0 && produtoValor <= 0) {
+  const produtosEstoqueArr = produtosEstoqueSelecionados.slice();
+
+  if (servicosArr.length === 0 && produtosEstoqueArr.length === 0) {
     showToast('Selecione ao menos um serviço ou produto', 'error');
-    return;
-  }
-  if (produtoValor > 0 && !produtoNome) {
-    showToast('Informe o nome do produto avulso', 'error');
     return;
   }
 
   const totalServicos = servicosArr.reduce((s, v) => s + v.valor, 0);
-  const total = totalServicos + produtoValor;
+  const totalProdutosEstoque = produtosEstoqueArr.reduce((s, p) => s + (p.qtd * p.valorUnitario), 0);
+  const total = totalServicos + totalProdutosEstoque;
 
   const clientes = DB.get('clientes_atendimento') || [];
   const idx = clientes.findIndex(c => c.id === atendimentoClienteId);
   if (idx === -1) return;
 
+  // Dar baixa nos produtos do estoque usados
+  const estoqueProdutos = DB.get('estoque_produtos') || [];
+  produtosEstoqueArr.forEach(item => {
+    const p = estoqueProdutos.find(x => x.id === item.produtoId);
+    if (!p) return;
+    p.qtdRestante = Math.max(0, p.qtdRestante - item.qtd);
+    if (p.qtdRestante <= 0) {
+      showToast(`${p.nome} esgotado — movido para Últimas compras`);
+    }
+  });
+  DB.set('estoque_produtos', estoqueProdutos);
+
   const registro = {
     id: gerarId(),
     data,
     servicos: servicosArr,
-    produto: produtoValor > 0 ? { nome: produtoNome, valor: produtoValor } : null,
+    produtosEstoque: produtosEstoqueArr.map(p => ({ nome: p.nome, qtd: p.qtd, valorUnitario: p.valorUnitario })),
     total,
     lancamentoId: null
   };
@@ -1249,10 +1363,19 @@ function salvarAtendimento() {
   clientes[idx].atendimentos.push(registro);
   clientes[idx].atendimentos.sort((a, b) => a.data.localeCompare(b.data));
 
+  // Se o aviso de 3 meses estava ativo quando este atendimento foi aberto,
+  // este atendimento se torna o novo marco de referência para a próxima contagem
+  if (avisoTresMesesAtivoNesteAtendimento) {
+    clientes[idx].marcoTresMeses = data;
+  }
+
   // Gerar receita financeira
   const lancamentos = DB.get('lancamentos') || [];
   const [y, m] = data.split('-');
-  const descricaoItens = [...servicosArr.map(s => s.nome), produtoNome].filter(Boolean).join(', ');
+  const descricaoItens = [
+    ...servicosArr.map(s => s.nome),
+    ...produtosEstoqueArr.map(p => `${p.nome} x${p.qtd}`)
+  ].filter(Boolean).join(', ');
   const lancamentoId = gerarId();
   lancamentos.push({
     id: lancamentoId,
@@ -1303,6 +1426,8 @@ function abrirModalHistoricoCliente(id) {
     lista.innerHTML = atendimentos.map(a => {
       const tags = [
         ...a.servicos.map(s => `<span class="hist-atend-tag">${s.nome}</span>`),
+        ...(a.produtosEstoque || []).map(p => `<span class="hist-atend-tag">${p.nome} x${p.qtd}</span>`),
+        // Compatibilidade com registros antigos que ainda têm produto avulso
         a.produto ? `<span class="hist-atend-tag">${a.produto.nome}</span>` : ''
       ].filter(Boolean).join('');
 
@@ -1536,8 +1661,43 @@ function initEstoque() {
 /* ─── Render principal da aba ─── */
 let estoqueTabAtiva = 'estoque';
 
+/* ─── Dashboard de produtos: despesas, receitas e lucro do mês ─── */
+function renderDashboardEstoque() {
+  const atual = mesAtual();
+
+  // Despesas do mês: compras de estoque feitas no mês (pela data de compra)
+  const produtos = DB.get('estoque_produtos') || [];
+  const despesaMes = produtos
+    .filter(p => p.dataCompra && p.dataCompra.slice(0, 7) === atual)
+    .reduce((s, p) => s + p.valorTotal, 0);
+
+  // Receitas do mês: vendas de produtos do estoque feitas em atendimentos no mês
+  const clientes = DB.get('clientes_atendimento') || [];
+  let receitaMes = 0;
+  clientes.forEach(c => {
+    (c.atendimentos || []).forEach(a => {
+      if (a.data && a.data.slice(0, 7) === atual) {
+        (a.produtosEstoque || []).forEach(p => {
+          receitaMes += p.qtd * p.valorUnitario;
+        });
+      }
+    });
+  });
+
+  const lucroMes = receitaMes - despesaMes;
+
+  document.getElementById('estoque-dash-despesa').textContent = formatBRL(despesaMes);
+  document.getElementById('estoque-dash-receita').textContent = formatBRL(receitaMes);
+
+  const lucroEl = document.getElementById('estoque-dash-lucro');
+  lucroEl.textContent = formatBRL(lucroMes);
+  lucroEl.className = 'stat-value ' + (lucroMes >= 0 ? 'positive' : 'negative');
+}
+
 function renderEstoque(tab) {
   if (tab) estoqueTabAtiva = tab;
+
+  renderDashboardEstoque();
 
   const todos = DB.get('estoque_produtos') || [];
   const emEstoque = todos.filter(p => p.qtdRestante > 0);
@@ -1555,52 +1715,91 @@ function renderEstoque(tab) {
 
   lista.sort((a, b) => b.dataCompra.localeCompare(a.dataCompra));
 
-  const grid = document.getElementById('estoque-grid');
+  const tbody = document.getElementById('estoque-tbody');
 
   if (lista.length === 0) {
-    grid.innerHTML = `
-      <div class="estoque-empty">
-        <div class="empty-icon">${estoqueTabAtiva === 'estoque' ? '📦' : '🗃️'}</div>
-        <p>${estoqueTabAtiva === 'estoque' ? 'Nenhum produto em estoque' : 'Nenhuma compra esgotada ainda'}</p>
-      </div>`;
+    const msg = estoqueTabAtiva === 'estoque' ? 'Nenhum produto em estoque' : 'Nenhuma compra esgotada ainda';
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:32px;color:var(--text-muted)">${msg}</td></tr>`;
     return;
   }
 
-  grid.innerHTML = lista.map(p => renderCardEstoque(p)).join('');
+  tbody.innerHTML = lista.map(p => renderLinhaEstoque(p)).join('');
 }
 
-function renderCardEstoque(p) {
-  const pct = Math.min((p.qtdRestante / p.qtdTotal) * 100, 100);
+function renderLinhaEstoque(p) {
   const esgotado = p.qtdRestante === 0;
-  const baixo = !esgotado && pct <= 20;
-
-  const cardClass = esgotado ? 'esgotado' : (baixo ? 'baixo' : '');
-  const fillClass = esgotado ? 'esgotado' : (baixo ? 'baixo' : '');
-
-  const botaoDecremento = esgotado ? '' : `
-    <button class="btn-decremento" onclick="decrementarEstoque('${p.id}')" title="Dar baixa de 1 unidade">−1</button>`;
+  const botaoDecremento = esgotado ? '' :
+    `<button class="btn-decremento" onclick="decrementarEstoque('${p.id}')" title="Dar baixa de 1 unidade">−1</button>`;
 
   return `
-    <div class="estoque-card ${cardClass}">
-      <div class="estoque-card-header">
-        <div>
-          <div class="estoque-nome">${p.nome}</div>
-          <div class="estoque-data-compra">Comprado em ${formatDataBR(p.dataCompra)}</div>
-        </div>
-        ${esgotado ? '<span class="estoque-badge-esgotado">Esgotado</span>' : ''}
-      </div>
-      <div class="estoque-valor-lote">${formatBRL(p.valorTotal)} pelo lote</div>
-      <div class="estoque-qtd-label">
-        <span>${p.qtdRestante} de ${p.qtdTotal} unidades</span>
-        <span>${esgotado ? 'Esgotado' : Math.round(pct) + '%'}</span>
-      </div>
-      <div class="estoque-qtd-bar">
-        <div class="estoque-qtd-fill ${fillClass}" style="width:${pct}%"></div>
-      </div>
-      <div class="estoque-actions">
+    <tr>
+      <td>
+        ${p.nome}
+        ${esgotado ? '<span class="estoque-badge-esgotado" style="margin-left:8px">Esgotado</span>' : ''}
+      </td>
+      <td>${p.qtdRestante}</td>
+      <td>${formatBRL(p.valorVenda || 0)}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="btn btn-secondary btn-sm" onclick="abrirModalEstoqueDetalhes('${p.id}')">Detalhes</button>
         ${botaoDecremento}
-      </div>
-    </div>`;
+      </td>
+    </tr>`;
+}
+
+/* ─── Modal de detalhes do produto ─── */
+let modalEstoqueDetalhesProdutoId = null;
+
+function abrirModalEstoqueDetalhes(id) {
+  modalEstoqueDetalhesProdutoId = id;
+  const produtos = DB.get('estoque_produtos') || [];
+  const p = produtos.find(x => x.id === id);
+  if (!p) return;
+
+  const qtdVendida = p.qtdTotal - p.qtdRestante;
+  const receitaProduto = qtdVendida * (p.valorVenda || 0);
+  const lucroProduto = receitaProduto - p.valorTotal;
+
+  document.getElementById('estd-titulo').textContent = `Detalhes — ${p.nome}`;
+  document.getElementById('estd-despesa-total').textContent = formatBRL(p.valorTotal);
+  document.getElementById('estd-valor-venda').textContent = formatBRL(p.valorVenda || 0);
+  document.getElementById('estd-qtd-vendida').textContent = `${qtdVendida} de ${p.qtdTotal}`;
+
+  const lucroEl = document.getElementById('estd-lucro');
+  lucroEl.textContent = formatBRL(lucroProduto);
+  lucroEl.className = 'estoque-detalhe-valor ' + (lucroProduto >= 0 ? 'lucro-positivo' : 'lucro-negativo');
+
+  document.getElementById('modal-estoque-detalhes').classList.add('open');
+}
+
+function fecharModalEstoqueDetalhes() {
+  document.getElementById('modal-estoque-detalhes').classList.remove('open');
+  modalEstoqueDetalhesProdutoId = null;
+}
+
+function excluirProdutoEstoque() {
+  if (!modalEstoqueDetalhesProdutoId) return;
+  if (!confirm('Excluir este produto do estoque? A despesa lançada nos financeiros também será removida.')) return;
+
+  const produtos = DB.get('estoque_produtos') || [];
+  const p = produtos.find(x => x.id === modalEstoqueDetalhesProdutoId);
+  if (!p) return;
+
+  // Remover o lançamento financeiro vinculado (afeta dashboard principal, histórico e dashboard do estoque)
+  if (p.lancamentoId) {
+    const lancamentos = (DB.get('lancamentos') || []).filter(l => l.id !== p.lancamentoId);
+    DB.set('lancamentos', lancamentos);
+  }
+
+  // Remover o produto do estoque
+  const restantes = produtos.filter(x => x.id !== modalEstoqueDetalhesProdutoId);
+  DB.set('estoque_produtos', restantes);
+
+  showToast('Produto e despesa removidos');
+  fecharModalEstoqueDetalhes();
+  renderEstoque();
+
+  const paginaAtiva = document.querySelector('.page.active')?.id;
+  if (paginaAtiva === 'page-dashboard') renderDashboard();
 }
 
 /* ─── Decremento manual (sem gerar lançamento) ─── */
@@ -1629,6 +1828,7 @@ function abrirModalEstoque() {
   document.getElementById('estq-nome').value = '';
   document.getElementById('estq-qtd').value = '';
   document.getElementById('estq-valor').value = '';
+  document.getElementById('estq-valor-venda').value = '';
   document.getElementById('estq-data').value = new Date().toISOString().split('T')[0];
   document.getElementById('modal-estoque').classList.add('open');
 }
@@ -1641,29 +1841,33 @@ function salvarProdutoEstoque() {
   const nome = document.getElementById('estq-nome').value.trim();
   const qtd = parseInt(document.getElementById('estq-qtd').value);
   const valor = parseFloat(document.getElementById('estq-valor').value);
+  const valorVenda = parseFloat(document.getElementById('estq-valor-venda').value);
   const data = document.getElementById('estq-data').value;
 
-  if (!nome || isNaN(qtd) || qtd <= 0 || isNaN(valor) || valor <= 0 || !data) {
+  if (!nome || isNaN(qtd) || qtd <= 0 || isNaN(valor) || valor <= 0 || isNaN(valorVenda) || valorVenda <= 0 || !data) {
     showToast('Preencha todos os campos corretamente', 'error');
     return;
   }
 
   const produtos = DB.get('estoque_produtos') || [];
+  const novoProdutoId = gerarId();
   produtos.push({
-    id: gerarId(),
+    id: novoProdutoId,
     nome,
     qtdTotal: qtd,
     qtdRestante: qtd,
     valorTotal: valor,
-    dataCompra: data
+    valorVenda,
+    dataCompra: data,
+    lancamentoId: null
   });
-  DB.set('estoque_produtos', produtos);
 
   // Gerar despesa financeira
   const lancamentos = DB.get('lancamentos') || [];
   const [y, m] = data.split('-');
+  const lancamentoId = gerarId();
   lancamentos.push({
-    id: gerarId(),
+    id: lancamentoId,
     data,
     tipo: 'despesa',
     categoria: 'Produtos',
@@ -1673,6 +1877,11 @@ function salvarProdutoEstoque() {
   });
   lancamentos.sort((a, b) => a.data.localeCompare(b.data));
   DB.set('lancamentos', lancamentos);
+
+  // Vincular o lançamento ao produto para permitir exclusão precisa
+  const produtoSalvo = produtos.find(p => p.id === novoProdutoId);
+  produtoSalvo.lancamentoId = lancamentoId;
+  DB.set('estoque_produtos', produtos);
 
   showToast('Produto cadastrado e despesa lançada');
   fecharModalEstoque();
